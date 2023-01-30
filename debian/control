@@ -9,7 +9,6 @@ Homepage: http://github.com/piggz/harbour-pinhole
 Package: harbour-pinhole
 Section: utils
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, qml-module-qtmultimedia
+Depends: ${shlibs:Depends}, ${misc:Depends}, qml-module-qtmultimedia, qml-module-org-kde-kirigami2
 Multi-Arch: same
 Description: Pinhole is a camera application built ontop of libcamera.
-
