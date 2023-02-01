@@ -155,13 +155,13 @@ Item {
     DockedListView {
         id: panelFormats
         model: modelFormats
-        selectedItem: settings.getCameraModeValue("format", modelFormats.defaultFormat())
+        selectedItem: (forceUpdate || !forceUpdate) ? settings.getCameraModeValue("format", modelFormats.defaultFormat()) : modelFormats.defaultFormat()
         rotation: iconRotation
         width: (iconRotation === 90
                 || iconRotation === 270) ? parent.height : parent.width / 2
 
         onClicked: {
-            console.log("Format:", value);
+            settings.setCameraModeValue("format", value);
             cameraProxy.setStillFormat(value);
             hide()
         }
@@ -170,16 +170,15 @@ Item {
     DockedListView {
         id: panelResolution
         model: sortedModelResolution
-        selectedItem: settings.getCameraModeValue("resolution", modelResolution.defaultResolution(settings.captureMode))
+        selectedItem: (forceUpdate || !forceUpdate) ?  settings.getCameraModeValue("resolution", modelResolution.defaultResolution(settings.captureMode)) : modelResolution.defaultResolution(settings.captureModel)
         rotation: iconRotation
         width: (iconRotation === 90
                 || iconRotation === 270) ? parent.height : parent.width / 2
 
         onClicked: {
             settings.setCameraModeValue("resolution", value);
-            hide();
-            console.log("selected resolution", value, settings.getCameraModeValue("resolution"));
             cameraProxy.setResolution(value);
+            hide();
         }
     }
 
@@ -278,10 +277,18 @@ Item {
             if (loadingComplete) {
                 if (visible) {
                     console.log("loading...")
-                    sldBrightness.value = settings.getCameraModeValue("brightness", 1);
+                    sldBrightness.value = settings.getCameraModeValue("brightness", 0);
+                    sldContrast.value = settings.getCameraModeValue("contrast", 0);
+                    sldSaturation.value = settings.getCameraModeValue("saturation", 0);
+                    sldAnalogueGain.value = settings.getCameraModeValue("analogueGain", 0);
+
                 } else {
                     console.log("saving...")
                     settings.setCameraModeValue("brightness", sldBrightness.value);
+                    settings.setCameraModeValue("contrast", sldContrast.value);
+                    settings.setCameraModeValue("saturation", sldSaturation.value);
+                    settings.setCameraModeValue("analogueGain", sldAnalogueGain.value);
+
                 }
             }
         }
@@ -357,8 +364,8 @@ Item {
                     sldVideoBitrate.value = settings.get("global", "videoBitrate", 1280000);
                 } else {
                     console.log("saving...")
-                    settings.set("global", "audioBitrate", sldAudioBitrate.value);
-                    settings.set("global", "videoBitrate", sldVideoBitrate.value);
+                    settings.setGlobalValue("audioBitrate", sldAudioBitrate.value);
+                    settings.setGlobalValue("videoBitrate", sldVideoBitrate.value);
                 }
             }
         }
@@ -399,20 +406,21 @@ Item {
                         property var values: ["none", "thirds", "ambience"]
 
                         function findIndex(id) {
-                            for (var i = 0; i < grids.length; i++) {
-                                if (grids[i]["id"] === id) {
+                            for (var i = 0; i < values.length; i++) {
+                                if (values[i] === id) {
                                     return i
                                 }
                             }
                             return 0
                         }
 
-                        currentIndex: findIndex(settings.get("global", "gridMode", "none"))
+                        currentIndex: findIndex(settings.gridMode)
                         onValueChanged: {
                             var index = gridSwitch.currentIndex;
-                            settings.set("global", "gridMode", gridSwitch.values[index]);
+                            settings.setGlobalValue("gridMode", gridSwitch.values[index]);
                         }
                     }
+
                     SliderPL {
                         id: sldVideoBitrate
                         label: qsTr("Video Bitrate")
@@ -447,7 +455,7 @@ Item {
                         text: qsTr("Store GPS location to metadata")
 
                         onCheckedChanged: {
-                            settings.set("global", "locationMetadata", checked);
+                            settings.setGlobalValue("locationMetadata", checked);
                         }
                     }
 
@@ -459,7 +467,7 @@ Item {
                         text: qsTr("Display manual controls")
 
                         onCheckedChanged: {
-                            settings.set("global", "showManualControls", checked);
+                            settings.setGlobalValue("showManualControls", checked);
                         }
                     }
 

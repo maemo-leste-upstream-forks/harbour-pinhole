@@ -11,7 +11,6 @@ PagePL {
     id: page
 
     property alias camera: camera
-    property bool _cameraReload: false
     property bool _completed: false
     property bool _focusAndSnap: false
     property bool _loadParameters: true
@@ -166,11 +165,6 @@ PagePL {
         cameraState: page._completed
                      && !page._cameraReload ? Camera.ActiveState : Camera.UnloadedState
 
-        imageProcessing.colorFilter: CameraImageProcessing.ColorFilterNone
-        imageProcessing.denoisingLevel: 1
-        imageProcessing.contrast: 1
-        imageProcessing.sharpeningLevel: 1
-
         // Write Orientation to metadata
         metaData.orientation:  camera.position === Camera.FrontFace ? (720 + camera.orientation - _pictureRotation) % 360 : (720 + camera.orientation + _pictureRotation) % 360
         metaData.cameraManufacturer: CameraManufacturer === "" ? null : CameraManufacturer
@@ -183,40 +177,6 @@ PagePL {
         metaData.gpsLongitude: settings.global.locationMetadata && positionSource.position.longitudeValid ? positionSource.position.coordinate.longitude : null
         metaData.gpsAltitude: settings.global.locationMetadata && positionSource.position.altitudeValid ? positionSource.position.coordinate.altitude : null
 
-        exposure {
-            //exposureCompensation: -1.0
-            exposureMode: Camera.ExposureAuto
-        }
-
-        flash.mode: Camera.FlashOff
-
-        onCameraStatusChanged: {
-            console.log("Camera status:", cameraStatusStr())
-
-            if (cameraStatus === Camera.StartingStatus) {
-                settingsOverlay.setCamera(camera)
-            }
-
-            if (cameraStatus === Camera.ActiveStatus && _loadParameters) {
-                if (zoomSlider.maximumValue != camera.maximumDigitalZoom) {
-                    zoomSlider.maximumValue = camera.maximumDigitalZoom
-                }
-
-                if (settings.global.captureMode === "video") {
-                    camera.captureMode = Camera.CaptureVideo
-                    btnModeSwitch._hilighted2 = true
-                } else {
-                    camera.captureMode = Camera.CaptureStillImage
-                    btnModeSwitch._hilighted2 = false
-                }
-
-                settingsOverlay.setMode(settings.global.captureMode)
-
-                camera.viewfinder.resolution = getNearestViewFinderResolution()
-                applySettings()
-
-                lblResolution.forceUpdate = !lblResolution.forceUpdate
-            }
         }
     }
 */
@@ -380,7 +340,6 @@ PagePL {
                     }
 
                     LabelPL {
-                        property bool forceUpdate: false
                         id: lblResolution
                         color: styler.themePrimaryColor
                         text: (forceUpdate
@@ -593,20 +552,6 @@ PagePL {
         _completed = true
     }
 
-    /*TODO
-    Connections {
-        target: app
-
-        onActiveFocusChanged: {
-            if (!app.activeFocus) {
-                camera.stop()
-            } else {
-                if (pageStack.depth === 1)
-                    camera.start()
-            }
-        }
-    }*/
-
     Connections {
         target: pageStack
 
@@ -665,8 +610,7 @@ PagePL {
 
             console.log(settings.enabledCameras, settings.enabledCameras.length);
 
-            settings.cameraName = modelCamera.get(settings.cameraId);
-            cameraProxy.setCameraIndex(settings.cameraName);
+            cameraProxy.setCameraIndex(modelCamera.get(settings.cameraId));
 
             var f = settings.getCameraModeValue("format", settingsOverlay.modelFormat.defaultFormat());
             settings.setCameraModeValue("format", f);
@@ -678,16 +622,7 @@ PagePL {
             console.log(f, r);
             cameraProxy.setResolution(r);
 
-            _cameraReload = true
-        }
-    }
-    Timer {
-        id: reloadTimer
-        interval: 100
-        running: page._cameraReload
-                 && camera.cameraStatus === Camera.UnloadedStatus
-        onTriggered: {
-            page._cameraReload = false
+            applySettings();
         }
     }
 
@@ -770,22 +705,12 @@ PagePL {
 
     function applySettings() {
         console.log("Applying settings in", settings.captureMode,
-                    "mode for", settings.cameraName)
+                    "mode for", modelCamera.get(settings.cameraId))
 
-        camera.imageProcessing.setColorFilter(settings.mode.effect)
-        camera.exposure.setExposureMode(settings.mode.exposure)
-        camera.flash.setFlashMode(settings.mode.flash)
-        camera.imageProcessing.setWhiteBalanceMode(settings.mode.whiteBalance)
-        setFocusMode(settings.mode.focus)
-
-        if (settings.mode.iso === 0) {
-            camera.exposure.setAutoIsoSensitivity()
-        } else {
-            camera.exposure.setManualIsoSensitivity(settings.mode.iso)
-        }
-
-        camera.imageCapture.setResolution(settings.resolution("image"))
-        camera.videoRecorder.resolution = settings.resolution("video")
+        cameraProxy.setControlValue(CameraProxy.Brightness, settings.getCameraModeValue("brightness"), 0);
+        cameraProxy.setControlValue(CameraProxy.Contrast, settings.getCameraModeValue("contrast"), 0);
+        cameraProxy.setControlValue(CameraProxy.Saturation, settings.getCameraModeValue("saturation"), 0);
+        cameraProxy.setControlValue(CameraProxy.AnalogueGain, settings.getCameraModeValue("analogueGain"), 0);
     }
 
     function setFocusMode(focus) {
@@ -888,9 +813,17 @@ PagePL {
         var filename = fsOperations.writableLocation(
                     "image",
                     settings.get("global", "storagePath", "")) + "/IMG_" + Qt.formatDateTime(
-                    new Date(), "yyyyMMdd_hhmmss") + ".jpg";
+                    new Date(), "yyyyMMdd_hhmmss") + "." + fileExtension();
 
         cameraProxy.stillCapture(filename);
+    }
+
+    function fileExtension() {
+        var f = settings.getCameraModeValue("format", settingsOverlay.modelFormat.defaultFormat())
+        if (f == "MJPEG") {
+            f = "JPG";
+        }
+        return f.toLowerCase();
     }
 
     function zoomIn() {
