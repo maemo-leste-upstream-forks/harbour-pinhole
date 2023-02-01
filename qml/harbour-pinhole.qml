@@ -13,26 +13,48 @@ ApplicationWindowPL {
 
     Settings {
         id: settings
-        property string cameraName
         property int cameraId: 0
         property string captureMode
         property int cameraCount
         property variant enabledCameras: [] //Calculated on startup and when disabledCameras changes
         property string disabledCameras: ""
         property int rotationCorrection: 0
+        property string gridMode: "none"
         
         function getCameraValue(s, d) {
             return get(cameraId, s, d);
         }
         function setCameraValue(s, v) {
+            if (!loadingComplete) {
+                return;
+            }
             set(cameraId, s, v);
+            forceUpdate = !forceUpdate;
         }
+
+        function setGlobalValue(s, v) {
+            if (!loadingComplete) {
+                return;
+            }
+            settings[s] = v;
+            set("global", s, v);
+            forceUpdate = !forceUpdate;
+        }
+
+        function getGlobalValue(s, d) {
+            settings[s] = get("global", s, d);
+            return settings[s];
+        }
+
         function getCameraModeValue(s, d) {
             return get(cameraId + "_" + captureMode, s, d);
         }
+
         function setCameraModeValue(s, v) {
             set(cameraId + "_" + captureMode, s, v);
+            forceUpdate = !forceUpdate;
         }
+
         function strToSize(siz) {
             var w = parseInt(siz.substring(0, siz.indexOf("x")))
             var h = parseInt(siz.substring(siz.indexOf("x") + 1))
@@ -65,24 +87,30 @@ ApplicationWindowPL {
             console.log("Disabled Cameras:", settings.disabledCameras);
             console.log("Enabled Cameras :", settings.enabledCameras);
 
-            settings.set("global", "disabledCameras", disabledCameras);
+            setGlobalValue("disabledCameras", disabledCameras);
             app.forceUpdate = !app.forceUpdate;
+        }
+
+        function loadGlobalSettings() {
+            captureMode = getGlobalValue("captureMode", "image");
+            cameraId = getGlobalValue("cameraId", 0);
+            disabledCameras = getGlobalValue("disabledCameras", "");
+            gridMode = getGlobalValue("gridMode", "none");
+            rotationCorrection = getGlobalValue("rotationCorrection", 0);
+        }
+
+        function saveGlobalSettings() {
+            setGlobalValue("captureMode", captureMode);
+            setGlobalValue("cameraId", cameraId);
+            setGlobalValue("disabledCameras", disabledCameras);
+            setGlobalValue("gridMode", gridMode);
+            setGlobalValue("rotationCorrection", rotationCorrection);
         }
 
         Component.onCompleted: {
             console.log("Setting up default settings");
-            captureMode = get("global", "captureMode", "image");
-            cameraName = get("global", "cameraName", "");
-            cameraId = get("global", "cameraId", 0);
-            disabledCameras = get("global", "disabledCameras", "");
-
-            rotationCorrection = get("global", "rotationCorrection", 0);
-
-            set("global", "cameraId", cameraId);
-            set("global", "cameraName", cameraName);
-            set("global", "captureMode", captureMode);
-            set("global", "rotationCorrection", rotationCorrection);
-            settings.set("global", "disabledCameras", disabledCameras);
+            loadGlobalSettings();
+            saveGlobalSettings();
 
             cameraCount = modelCamera.rowCount;
         }
@@ -97,7 +125,7 @@ ApplicationWindowPL {
     DockModes { id: dockModes }
 
     initialPage: CameraUI {
-            id: cameraUI
+        id: cameraUI
     }
 
     Component.onCompleted: {
@@ -105,13 +133,12 @@ ApplicationWindowPL {
         loadingComplete = true;
     }
 
-    /*
-    onApplicationActiveChanged: {
-        if (Qt.application.state == Qt.ApplicationActive) {
-            cameraUI.camera.start();
+    onRunningChanged: {
+        if (!app.active) {
+            cameraProxy.stop();
         } else {
-            cameraUI.camera.stop();
+            if (pageStack.depth === 1)
+                cameraProxy.startViewFinder();
         }
     }
-*/
 }
