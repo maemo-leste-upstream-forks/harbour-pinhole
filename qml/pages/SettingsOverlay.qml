@@ -14,7 +14,6 @@ Item {
                              || panelResolution.expanded
                              || panelStorage.expanded || panelGeneral.expanded
 
-    property alias modelFormat: modelFormats
 
     Item {
         id: buttonPanel
@@ -51,7 +50,7 @@ Item {
                 iconColor: styler.themePrimaryColor
                 iconRotation: iconRotation
                 iconSource: styler.customIconPrefix + "../pics/icon-m-pixelformat.png"
-                visible: modelFormats.rowCount > 0
+                visible: modelFormats ? modelFormats.rowCount > 0 : false
 
                 onClicked: {
                     panelFormats.show()
@@ -63,7 +62,7 @@ Item {
                 iconColor: styler.themePrimaryColor
                 iconRotation: iconRotation
                 iconSource: styler.customIconPrefix + "../pics/icon-m-resolution.png"
-                visible: modelResolution.rowCount > 0
+                visible: modelResolution ? modelResolution.rowCount > 0 : false
 
                 onClicked: {
                     panelResolution.show()
@@ -120,7 +119,7 @@ Item {
                 iconColor: styler.themePrimaryColor
                 iconRotation: iconRotation
                 iconSource: styler.customIconPrefix + "../pics/icon-m-sd-card.svg"
-                visible: modelStorage.rowCount > 0
+                visible: modelStorage ? modelStorage.rowCount > 0 : false
 
                 onClicked: {
                     modelStorage.scan("/media/sdcard")
@@ -155,7 +154,7 @@ Item {
     DockedListView {
         id: panelFormats
         model: modelFormats
-        selectedItem: (forceUpdate || !forceUpdate) ? settings.getCameraModeValue("format", modelFormats.defaultFormat()) : modelFormats.defaultFormat()
+        selectedItem: (forceUpdate || !forceUpdate) && modelFormats ? settings.getCameraModeValue("format", modelFormats.defaultFormat()) : ""
         rotation: iconRotation
         width: (iconRotation === 90
                 || iconRotation === 270) ? parent.height : parent.width / 2
@@ -170,7 +169,7 @@ Item {
     DockedListView {
         id: panelResolution
         model: sortedModelResolution
-        selectedItem: (forceUpdate || !forceUpdate) ?  settings.getCameraModeValue("resolution", modelResolution.defaultResolution(settings.captureMode)) : modelResolution.defaultResolution(settings.captureModel)
+        selectedItem: (forceUpdate || !forceUpdate) && modelResolution ?  settings.getCameraModeValue("resolution", modelResolution.defaultResolution(settings.captureMode)) : ""
         rotation: iconRotation
         width: (iconRotation === 90
                 || iconRotation === 270) ? parent.height : parent.width / 2
@@ -511,10 +510,6 @@ Item {
         }
     }
 
-    FormatModel {
-        id: modelFormats
-    }
-
     EffectsModel {
         id: modelEffects
     }
@@ -540,8 +535,6 @@ Item {
     }
 
     function setCameraProxy(cam) {
-        modelFormats.setCameraProxy(cameraProxy);
-        modelResolution.setCameraProxy(cameraProxy);
 /*
         modelExposure.setCamera(cam)
         modelEffects.setCamera(cam)
