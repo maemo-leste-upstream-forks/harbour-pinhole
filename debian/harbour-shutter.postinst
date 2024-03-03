@@ -1,0 +1,12 @@
+#!/bin/bash
+if   [ "configure" = "$1" ] && [ "." = ".$2" ]; then  shift ; set -- "1" "$@"
+elif [ "configure" = "$1" ] && [ "." != ".$2" ]; then shift ; set -- "2" "$@"
+fi
+
+dpkg -L harbour-shutter | grep '^-' | xargs -d '\n' -i chown root:root {} || true
+dpkg -L harbour-shutter | grep '^/usr/bin' | xargs -d '\n' -i chown root:root {} || true
+dpkg -L harbour-shutter | grep '^/usr/share/harbour-shutter' | xargs -d '\n' -i chown root:root {} || true
+dpkg -L harbour-shutter | grep '^/usr/share/applications/harbour-shutter.desktop' | xargs -d '\n' -i chown root:root {} || true
+dpkg -L harbour-shutter | grep '^/usr/share/icons/hicolor/.*/apps/harbour-shutter.png' | xargs -d '\n' -i chown root:root {} || true
+dpkg -L harbour-shutter | grep '^# >> files' | xargs -d '\n' -i chown root:root {} || true
+dpkg -L harbour-shutter | grep '^# << files' | xargs -d '\n' -i chown root:root {} || true

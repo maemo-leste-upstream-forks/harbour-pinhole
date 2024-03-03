@@ -1,5 +1,5 @@
-harbour-pinhole (0.0.1-1) unstable; urgency=low
+harbour-shutter (0.0.2-1) unstable; urgency=low
 
   * Initial import
 
- -- Rafael Diniz <rafael@riseup.net>  Tue, 24 Jan 2023 01:53:12 +0300
+ -- Rafael Diniz <rafael@riseup.net>  Sun, 03 Mar 2024 12:00:00 +0000
