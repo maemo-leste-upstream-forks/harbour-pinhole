@@ -1,11 +1,13 @@
 [Desktop Entry]
 Type=Application
-Icon=harbour-pinhole
-Exec=harbour-pinhole
+X-Nemo-Application-Type=silica-qt5
+Icon=harbour-shutter
+Exec=harbour-shutter
 Name=Camera
 Name[ru]=камера
 
 [X-Sailjail]
 Permissions=Audio;Location;RemovableMedia;Pictures;Videos
 OrganizationName=uk.co.piggz
-ApplicationName=AdvancedCamera
+ApplicationName=ShutterCamera
+Sandboxing=Disabled

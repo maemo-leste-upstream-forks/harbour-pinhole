@@ -18,6 +18,7 @@
 
 #include "viewfinder.h"
 #include "viewfinder2d.h"
+#include "facedetection.h"
 
 #include "image.h"
 
@@ -109,11 +110,11 @@ private:
     QMutex m_mutex;
 
     std::map<libcamera::FrameBuffer *, std::unique_ptr<Image>> m_mappedBuffers;
-    libcamera::FrameBufferAllocator *m_viewFinderAllocator = nullptr;
-    libcamera::FrameBufferAllocator *m_stillAllocator = nullptr;
+    libcamera::FrameBufferAllocator *m_allocator = nullptr;
 
     // Capture state, buffers queue and statistics
     CameraState m_state = Stopped;
+
     libcamera::Stream *m_viewFinderStream;
     libcamera::Stream *m_stillStream;
     std::map<const libcamera::Stream *, QQueue<libcamera::FrameBuffer *>> m_freeBuffers;
@@ -126,22 +127,36 @@ private:
     std::map<libcamera::PixelFormat, std::vector<libcamera::Size>> m_viewFinderFormats;
     std::map<libcamera::PixelFormat, std::vector<libcamera::Size>> m_stillFormats;
 
-    std::unique_ptr<libcamera::CameraConfiguration> m_viewFinderConfig;
-    std::unique_ptr<libcamera::CameraConfiguration> m_stillConfig;
+    std::unique_ptr<libcamera::CameraConfiguration> m_config;
+
+    libcamera::StreamConfiguration *m_vfStreamConfig = nullptr;
+    libcamera::StreamConfiguration *m_stillStreamConfig = nullptr;
 
     QString m_currentStillFormat;
-    QSize m_currentStillResolution;
+    libcamera::Size m_currentStillResolution;
     QString m_saveFileName;
     int m_frame = 0;
+    bool m_captureStill = false;
+    bool m_singleStream = false;
+
+    bool buildConfiguration( std::initializer_list<libcamera::StreamRole> roles);
+    bool configureCamera();
 
     void processCapture();
     void processViewfinder(libcamera::FrameBuffer *buffer);
     void processStill(libcamera::FrameBuffer *buffer);
 
     void requestComplete(libcamera::Request *request);
-    void cacheFormats();
+    void cacheFormats(libcamera::StreamRole role);
+
+    libcamera::Size bestViewfinderResolution(libcamera::PixelFormat format, libcamera::Size stillSize);
 
     std::unordered_map<Control, libcamera::ControlValue> m_controlValues;
+
+    //Face detection
+    FaceDetection m_fd;
+    QList<QRectF> m_rects;
+    uint m_rectDelay = 0;
 };
 
 class CaptureEvent : public QEvent

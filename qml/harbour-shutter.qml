@@ -1,7 +1,7 @@
 import QtQuick 2.0
 import QtMultimedia 5.6
 import "pages"
-import uk.co.piggz.pinhole 1.0
+import uk.co.piggz.shutter 1.0
 
 import "./components/"
 import "./components/platform"
@@ -18,7 +18,6 @@ ApplicationWindowPL {
         property int cameraCount
         property variant enabledCameras: [] //Calculated on startup and when disabledCameras changes
         property string disabledCameras: ""
-        property int rotationCorrection: 0
         property string gridMode: "none"
         
         function getCameraValue(s, d) {
@@ -96,7 +95,6 @@ ApplicationWindowPL {
             cameraId = getGlobalValue("cameraId", 0);
             disabledCameras = getGlobalValue("disabledCameras", "");
             gridMode = getGlobalValue("gridMode", "none");
-            rotationCorrection = getGlobalValue("rotationCorrection", 0);
         }
 
         function saveGlobalSettings() {
@@ -104,7 +102,6 @@ ApplicationWindowPL {
             setGlobalValue("cameraId", cameraId);
             setGlobalValue("disabledCameras", disabledCameras);
             setGlobalValue("gridMode", gridMode);
-            setGlobalValue("rotationCorrection", rotationCorrection);
         }
 
         Component.onCompleted: {
@@ -137,8 +134,9 @@ ApplicationWindowPL {
         if (!app.active) {
             cameraProxy.stop();
         } else {
-            if (pageStack.depth === 1)
-                cameraProxy.startViewFinder();
+            if (pageStack.depth === 1){
+                cameraUI.startViewfinder();
+            }
         }
     }
 }

@@ -1,6 +1,7 @@
 #include "cameraproxy.h"
 #include <QDebug>
 #include <QCoreApplication>
+#include "encoder_jpeg.h"
 
 QDebug operator<< (QDebug d, const libcamera::Size &sz) {
     d << "Size:" << sz.width << "x" << sz.height;
@@ -15,7 +16,7 @@ QDebug operator<< (QDebug d, const std::vector<libcamera::Size> &vs) {
 }
 
 QDebug operator<< (QDebug d, const std::map<libcamera::PixelFormat, std::vector<libcamera::Size> > &fm) {
-    for(auto pf : fm) {
+    for(const auto &pf : fm) {
         d << "Format:" << QString::fromStdString(pf.first.toString()) << pf.second;
     }
     return d;
@@ -56,18 +57,31 @@ QStringList CameraProxy::supportedFormats() const
     qDebug() << Q_FUNC_INFO;
 
     QStringList f;
-    for(auto pf : m_stillFormats) {
+    for(const auto &pf : m_stillFormats) {
         f << QString::fromStdString(pf.first.toString());
     }
     return f;
 }
 
+
 void CameraProxy::setStillFormat(const QString &format)
 {
-    qDebug() << Q_FUNC_INFO;
+    qDebug() << Q_FUNC_INFO << format;
+
+    CameraState oldstate = state();
+
+    stop();
 
     m_currentStillFormat = format;
-    formatChanged();
+    if (m_stillStreamConfig) {
+        m_stillStreamConfig->pixelFormat = libcamera::PixelFormat::fromString(format.toStdString());
+        configureCamera();
+    }
+
+    if (oldstate == CapturingViewFinder) {
+        startViewFinder();
+    }
+    Q_EMIT formatChanged();
 }
 
 QString CameraProxy::currentStillFormat() const
@@ -79,9 +93,23 @@ QString CameraProxy::currentStillFormat() const
 
 void CameraProxy::setResolution(const QSize &res)
 {
-    qDebug() << Q_FUNC_INFO;
-    m_currentStillResolution = res;
-    resolutionChanged();
+    qDebug() << Q_FUNC_INFO << res;
+
+    CameraState oldstate = state();
+
+    stop();
+
+    m_currentStillResolution = libcamera::Size(res.width(), res.height());
+
+    if (m_stillStreamConfig) {
+        m_stillStreamConfig->size = libcamera::Size(res.width(), res.height());
+        configureCamera();
+    }
+
+    if (oldstate == CapturingViewFinder) {
+        startViewFinder();
+    }
+    Q_EMIT resolutionChanged();
 }
 
 std::vector<libcamera::Size> CameraProxy::supportedResoluions(QString format)
@@ -97,14 +125,6 @@ libcamera::ControlInfoMap CameraProxy::supportedControls() const
     return libcamera::ControlInfoMap();
 }
 
-void CameraProxy::setViewFinder(ViewFinder2D *vf)
-{
-    qDebug() << Q_FUNC_INFO << vf;
-    m_viewFinder = vf;
-    connect(m_viewFinder, &ViewFinder2D::renderComplete,
-            this, &CameraProxy::renderComplete);
-}
-
 void CameraProxy::setCameraIndex(QString id)
 {
     qDebug() << Q_FUNC_INFO;
@@ -112,7 +132,6 @@ void CameraProxy::setCameraIndex(QString id)
     if (m_cameraManager && !id.isEmpty()) {
         m_currentCameraId = id;
         const std::shared_ptr<libcamera::Camera> &cam = m_cameraManager->get(id.toStdString());
-
 
         if (cam->acquire()) {
             qInfo() << "Failed to acquire camera" << cam->id().c_str();
@@ -126,124 +145,273 @@ void CameraProxy::setCameraIndex(QString id)
         }
 
         m_currentCamera = cam;
-        cacheFormats();
+        cacheFormats(libcamera::StreamRole::Viewfinder);
+        cacheFormats(libcamera::StreamRole::StillCapture);
+
+        buildConfiguration({libcamera::StreamRole::Viewfinder, libcamera::StreamRole::StillCapture});
 
         //Print controls
         qDebug() << "Controls:";
         auto controls = m_currentCamera->controls();
 
-        for(auto control: controls) {
+        for(const auto &control: controls) {
             qDebug() << "Control:" << control.first->id() << control.first->type() << QString::fromStdString(control.first->name()) <<  QString::fromStdString(control.second.toString());
-            for (auto val : control.second.values()) {
+            for (const auto &val : control.second.values()) {
                 qDebug() << "Value: " << QString::fromStdString(val.toString());
             }
         }
 
         Q_EMIT cameraChanged();
-        startViewFinder();
     }
+}
+
+bool CameraProxy::buildConfiguration(std::initializer_list<libcamera::StreamRole> roles)
+{
+    qDebug() << Q_FUNC_INFO;
+
+    //Configure the camera for view finder
+    m_config = m_currentCamera->generateConfiguration(roles);
+
+    if (!m_config) {
+        //Configure for viewfinder only
+        m_config = m_currentCamera->generateConfiguration({libcamera::StreamRole::Viewfinder});
+    }
+    bool multiConfig = m_config->size() == 2;
+
+    qDebug() << "Configuring camera...." << roles.size() << multiConfig;
+    if (m_currentCamera->configure(m_config.get()) < 0) {
+        qInfo() << "Failed to configure camera";
+        return false;
+    }
+
+    if (multiConfig) {
+        m_vfStreamConfig = &m_config->at(0);
+        m_stillStreamConfig = &m_config->at(1);
+        m_viewFinderStream = m_vfStreamConfig->stream();
+        m_stillStream = m_stillStreamConfig->stream();
+    } else {
+        if (roles.size() == 2) {
+            m_singleStream = true;
+            qDebug() << "Device can only handle a single stream";
+        }
+        if (roles.begin()[0] == libcamera::StreamRole::Viewfinder) {
+            m_vfStreamConfig = &m_config->at(0);
+            m_stillStreamConfig = nullptr;
+            m_viewFinderStream = m_vfStreamConfig->stream();
+            m_stillStream = nullptr;
+        } else {
+            m_vfStreamConfig = nullptr;
+            m_stillStreamConfig = &m_config->at(0);
+            m_stillStream = m_stillStreamConfig->stream();
+            m_viewFinderStream = nullptr;
+        }
+    }
+
+    /* Allocate and map buffers. */
+    m_allocator = new libcamera::FrameBufferAllocator(m_currentCamera);
+
+    qDebug() << "Streams: " << m_viewFinderStream << m_stillStream;
+    return true;
+}
+
+bool CameraProxy::configureCamera()
+{
+    if (m_stillStreamConfig) {
+        m_stillStreamConfig->size = m_currentStillResolution;
+        m_stillStreamConfig->pixelFormat = libcamera::PixelFormat::fromString(m_currentStillFormat.toStdString());
+    }
+
+    libcamera::CameraConfiguration::Status validation = m_config->validate();
+
+    if (validation == libcamera::CameraConfiguration::Invalid) {
+        qWarning() << "Failed to create valid camera configuration";
+        return false;
+    }
+
+    if (validation == libcamera::CameraConfiguration::Adjusted) {
+        qInfo() << "Stream configuration adjusted to "
+                << m_vfStreamConfig->toString().c_str();
+    }
+
+    if (m_currentCamera->configure(m_config.get()) < 0) {
+        qInfo() << "Failed to configure camera";
+        return false;
+    }
+
+    return true;
+}
+
+void CameraProxy::cacheFormats(libcamera::StreamRole role)
+{
+    qDebug() << Q_FUNC_INFO << (int)role;
+
+    if (role == libcamera::StreamRole::Viewfinder) {
+        m_viewFinderFormats.clear();
+        if (!buildConfiguration({libcamera::StreamRole::Viewfinder})) {
+            return;
+        }
+
+        for (const libcamera::PixelFormat format : m_vfStreamConfig->formats().pixelformats()) {
+            m_viewFinderFormats[format] = m_vfStreamConfig->formats().sizes(format);
+        }
+        qDebug() << "VF Formats:" << m_viewFinderFormats;
+    }
+
+    if (role == libcamera::StreamRole::StillCapture) {
+        m_stillFormats.clear();
+        if (!buildConfiguration({libcamera::StreamRole::StillCapture})) {
+            return;
+        }
+
+        for (const libcamera::PixelFormat format : m_stillStreamConfig->formats().pixelformats()) {
+            m_stillFormats[format] = m_stillStreamConfig->formats().sizes(format);
+        }
+        qDebug() << "Still Formats:" << m_stillFormats;
+    }
+}
+
+libcamera::Size CameraProxy::bestViewfinderResolution(libcamera::PixelFormat format, libcamera::Size stillSize)
+{
+    std::vector<libcamera::Size> sizesForFormat;
+    libcamera::Size bestSize;
+    libcamera::Size backupSize;
+
+    size_t minMpx = 307200; //640x480
+    float stillAspect = (float)stillSize.width / (float)stillSize.height;
+
+    qDebug() << "Looking for best VF resolution for " << stillSize.toString().c_str();
+
+    //Try to find the best VF resolution for the given still resolution
+    //Criteria:
+    //  Needs to match (or close) the aspect ration
+    //  Needs to be at-least above the minimum pixel count
+    if (auto search = m_viewFinderFormats.find(format); search != m_viewFinderFormats.end()) {
+        sizesForFormat = search->second;
+
+        for (auto sz : sizesForFormat) {
+            qDebug() << "Checking " << sz.toString().c_str();
+
+            float aspect = (float)sz.width / (float)sz.height;
+            size_t mpx = sz.width * sz.height;
+
+            if (mpx >= minMpx && abs(aspect - stillAspect) < 0.1) {
+                bestSize = sz;
+                goto end;
+            }
+            if (mpx >= minMpx && abs(aspect - stillAspect) < 0.3) {
+                backupSize = sz;
+            }
+        }
+    }
+
+    if (bestSize.isNull()) {
+        bestSize = backupSize;
+    }
+end:
+    qDebug() << "Picked " << bestSize.toString().c_str();
+
+    return bestSize;
+}
+
+void CameraProxy::setViewFinder(ViewFinder2D *vf)
+{
+    qDebug() << Q_FUNC_INFO << vf;
+    m_viewFinder = vf;
+    connect(m_viewFinder, &ViewFinder2D::renderComplete,
+            this, &CameraProxy::renderComplete);
 }
 
 void CameraProxy::startViewFinder()
 {
-    qDebug() << Q_FUNC_INFO;
+    qDebug() << Q_FUNC_INFO << m_vfStreamConfig;
     int ret;
 
-    if (m_state != Stopped || !m_viewFinderConfig) {
-        qWarning() << "Camera not stopped, not starting viewfinder";
-        return;
+    if (m_state != Stopped) {
+        stop();
     }
     setState(ConfiguringViewFinder);
 
-    libcamera::StreamConfiguration &vfConfig = m_viewFinderConfig->at(0);
+    buildConfiguration({libcamera::StreamRole::Viewfinder, libcamera::StreamRole::StillCapture});
 
-    /* Use a format supported by the viewfinder if available. Default to JPEG*/
-    vfConfig.pixelFormat = libcamera::PixelFormat::fromString("MJPEG");
+    qDebug() << "View finder formats: ";
+    for (auto const &f : m_viewFinderFormats) {
+        qDebug() << f.first.toString().c_str();
+    }
+
+    // Use a format supported by the viewfinder if available. Default to JPEG
+    //if supported by the hardware as that is first on the list
     for (const libcamera::PixelFormat &format : m_viewFinder->nativeFormats()) {
-        auto match = m_viewFinderFormats.find(format);
+        qDebug() << "Checking if format is supported " << format.toString().c_str();
 
+        auto match = m_viewFinderFormats.find(format);
         if (match != m_viewFinderFormats.end()) {
-            vfConfig.pixelFormat = format;
+            m_vfStreamConfig->pixelFormat = format;
+            qDebug() << "Setting vf pixel format to " << format.toString().c_str();
             break;
         }
     }
 
     //Configure the viewfinder at a lower resulution for speed
-    vfConfig.size = libcamera::Size(1280,720);
+    m_vfStreamConfig->size = bestViewfinderResolution(m_vfStreamConfig->pixelFormat, m_currentStillResolution);
 
-    libcamera::CameraConfiguration::Status validation = m_viewFinderConfig->validate();
-    if (validation == libcamera::CameraConfiguration::Invalid) {
-        qWarning() << "Failed to create valid camera configuration";
+    if (!configureCamera()) {
+        qDebug() << "Problem configuring the camera";
         return;
     }
 
-    if (validation == libcamera::CameraConfiguration::Adjusted) {
-        qInfo() << "Stream configuration adjusted to "
-                << vfConfig.toString().c_str();
-    }
-
-    ret = m_currentCamera->configure(m_viewFinderConfig.get());
-    if (ret < 0) {
-        qInfo() << "Failed to configure camera";
-        return;
-    }
-
-    /* Store stream allocation. */
-    m_viewFinderStream = m_viewFinderConfig->at(0).stream();
-
-    /*
-         * Configure the viewfinder. If no color space is reported, default to
-         * sYCC.
-         */
-    ret = m_viewFinder->setFormat(vfConfig.pixelFormat,
-                                  QSize(vfConfig.size.width, vfConfig.size.height),
-                                  vfConfig.colorSpace.value_or(libcamera::ColorSpace::Sycc),
-                                  vfConfig.stride);
+    // Configure the viewfinder. If no color space is reported, default to sYCC.
+    ret = m_viewFinder->setFormat(m_vfStreamConfig->pixelFormat,
+                                  QSize(m_vfStreamConfig->size.width, m_vfStreamConfig->size.height),
+                                  m_vfStreamConfig->colorSpace.value_or(libcamera::ColorSpace::Sycc),
+                                  m_vfStreamConfig->stride);
     if (ret < 0) {
         qInfo() << "Failed to set viewfinder format";
         return;
     }
 
-    /* Allocate and map buffers. */
-    m_viewFinderAllocator = new libcamera::FrameBufferAllocator(m_currentCamera);
+    for (libcamera::StreamConfiguration &config : *m_config) {
+        libcamera::Stream *stream = config.stream();
+        qDebug() << "Allocating buffer for stream " << stream->configuration().toString().c_str();
 
-    ret = m_viewFinderAllocator->allocate(m_viewFinderStream);
-    if (ret < 0) {
-        qWarning() << "Failed to allocate capture buffers";
-        //TODO got error;
-        return;
-    }
+        ret = m_allocator->allocate(stream);
+        if (ret < 0) {
+            qWarning() << "Failed to allocate capture buffers";
+            return;
+        }
 
-    for (const std::unique_ptr<libcamera::FrameBuffer> &buffer : m_viewFinderAllocator->buffers(m_viewFinderStream)) {
-        /* Map memory buffers and cache the mappings. */
-        std::unique_ptr<Image> image =
-                Image::fromFrameBuffer(buffer.get(), Image::MapMode::ReadOnly);
-        assert(image != nullptr);
-        m_mappedBuffers[buffer.get()] = std::move(image);
+        for (const std::unique_ptr<libcamera::FrameBuffer> &buffer : m_allocator->buffers(stream)) {
+            qDebug() << "Mapping buffer";
+            /* Map memory buffers and cache the mappings. */
+            std::unique_ptr<Image> image = Image::fromFrameBuffer(buffer.get(), Image::MapMode::ReadOnly);
+            assert(image != nullptr);
+            m_mappedBuffers[buffer.get()] = std::move(image);
 
-        /* Store buffers on the free list. */
-        m_freeBuffers[m_viewFinderStream].enqueue(buffer.get());
+            /* Store buffers on the free list. */
+            m_freeBuffers[stream].enqueue(buffer.get());
+        }
     }
 
     m_requests.clear();
 
+    qDebug() << m_viewFinderStream;
+    for (const auto &s : m_freeBuffers) {
+        qDebug() << s.first->configuration().toString().c_str();
+    }
     /* Create requests and fill them with buffers from the viewfinder. */
     while (!m_freeBuffers[m_viewFinderStream].isEmpty()) {
+        qDebug() << "Creating requests...";
         libcamera::FrameBuffer *buffer = m_freeBuffers[m_viewFinderStream].dequeue();
 
         std::unique_ptr<libcamera::Request> request = m_currentCamera->createRequest();
         if (!request) {
             qWarning() << "Can't create request";
             ret = -ENOMEM;
-            //goto error;
             return;
         }
 
         ret = request->addBuffer(m_viewFinderStream, buffer);
         if (ret < 0) {
             qWarning() << "Can't set buffer for request";
-            //goto error;
-            return;
         }
 
         m_requests.push_back(std::move(request));
@@ -270,63 +438,6 @@ void CameraProxy::startViewFinder()
     }
 }
 
-void CameraProxy::requestComplete(libcamera::Request *request)
-{
-    //qDebug() << Q_FUNC_INFO;
-
-    if (request->status() == libcamera::Request::RequestCancelled)
-        return;
-
-    /*
-     * We're running in the libcamera thread context, expensive operations
-     * are not allowed. Add the buffer to the done queue and post a
-     * CaptureEvent for the application thread to handle.
-     */
-    {
-        QMutexLocker locker(&m_mutex);
-        m_doneQueue.enqueue(request);
-    }
-
-    QCoreApplication::postEvent(this, new CaptureEvent);
-}
-
-void CameraProxy::cacheFormats()
-{
-    // Clear any old cache
-    m_viewFinderFormats.clear();
-    m_stillFormats.clear();
-
-    //Configure the camera for view finder
-    m_viewFinderConfig = m_currentCamera->generateConfiguration({libcamera::StreamRole::Viewfinder});
-    if (!m_viewFinderConfig) {
-        qWarning() << "Failed to generate configuration from roles";
-        return;
-    }
-
-    libcamera::StreamConfiguration &vfConfig = m_viewFinderConfig->at(0);
-
-    for (const libcamera::PixelFormat format : vfConfig.formats().pixelformats()) {
-        m_viewFinderFormats[format] = vfConfig.formats().sizes(format);
-    }
-
-    //Configure the camera for stills
-    m_stillConfig = m_currentCamera->generateConfiguration({libcamera::StreamRole::StillCapture});
-    if (!m_stillConfig) {
-        qWarning() << "Failed to generate still configuration from roles";
-        return;
-    }
-
-    libcamera::StreamConfiguration &stConfig = m_stillConfig->at(0);
-
-    for (const libcamera::PixelFormat format : stConfig.formats().pixelformats()) {
-        m_stillFormats[format] = stConfig.formats().sizes(format);
-    }
-
-    qDebug() << m_viewFinderFormats;
-    qDebug() << m_stillFormats;
-
-}
-
 void CameraProxy::stop()
 {
     qDebug() << Q_FUNC_INFO;
@@ -342,16 +453,9 @@ void CameraProxy::stop()
         m_requests.clear();
         m_freeQueue.clear();
 
-        if (m_viewFinderAllocator) {
-            qDebug() << "deleting vf allocator";
-            delete m_viewFinderAllocator;
-            m_viewFinderAllocator = nullptr;
-        }
-        if (m_stillAllocator) {
-            qDebug() << "deleting still allocator";
-            delete m_stillAllocator;
-            m_stillAllocator = nullptr;
-        }
+        delete m_allocator;
+        m_allocator = nullptr;
+
         m_freeBuffers.clear();
         m_doneQueue.clear();
         setState(Stopped);
@@ -361,109 +465,105 @@ void CameraProxy::stop()
 void CameraProxy::stillCapture(const QString &filename)
 {
     qDebug() << Q_FUNC_INFO;
-    stop();
-
-    setState(ConfiguringStill);
 
     m_saveFileName = filename;
 
-    int ret;
-    m_frame = 0;
-    //Do stuff
-    libcamera::StreamConfiguration &stillConfig = m_stillConfig->at(0);
+    if (!m_singleStream) {
+        m_captureStill = true;
+    } else {
+        m_frame = 0;
+        int ret;
 
-    /* Use a format supported by the viewfinder if available. Default to JPEG*/
-    stillConfig.pixelFormat = libcamera::PixelFormat::fromString(m_currentStillFormat.toStdString());
+        stop();
 
-    //Configure the viewfinder at a lower resulution for speed
-    stillConfig.size = libcamera::Size(m_currentStillResolution.width(),m_currentStillResolution.height());
+        buildConfiguration({libcamera::StreamRole::StillCapture});
 
-    libcamera::CameraConfiguration::Status validation = m_stillConfig->validate();
-    if (validation == libcamera::CameraConfiguration::Invalid) {
-        qWarning() << "Failed to create valid camera configuration";
-        return;
-    }
+        // Set the preferred still format and size
+        m_stillStreamConfig->pixelFormat = libcamera::PixelFormat::fromString(m_currentStillFormat.toStdString());
+        m_stillStreamConfig->size = m_currentStillResolution;
 
-    if (validation == libcamera::CameraConfiguration::Adjusted) {
-        qInfo() << "Stream configuration adjusted to "
-                << stillConfig.toString().c_str();
-    }
+        libcamera::CameraConfiguration::Status validation = m_config->validate();
+        if (validation == libcamera::CameraConfiguration::Invalid) {
+            qWarning() << "Failed to create valid camera configuration";
+            return;
+        }
 
-    ret = m_currentCamera->configure(m_stillConfig.get());
-    if (ret < 0) {
-        qInfo() << "Failed to configure camera";
-        return;
-    }
+        if (validation == libcamera::CameraConfiguration::Adjusted) {
+            qInfo() << "Stream configuration adjusted to "
+                    << m_stillStreamConfig->toString().c_str();
+        }
 
-    /* Store stream allocation. */
-    m_stillStream = m_stillConfig->at(0).stream();
+        ret = m_currentCamera->configure(m_config.get());
+        if (ret < 0) {
+            qInfo() << "Failed to configure camera";
+            return;
+        }
 
-    /* Allocate and map buffers. */
-    m_stillAllocator = new libcamera::FrameBufferAllocator(m_currentCamera);
+        ret = m_allocator->allocate(m_stillStream);
+        if (ret < 0) {
+            qWarning() << "Failed to allocate still capture buffers";
+            //TODO got error;
+            return;
+        }
 
-    ret = m_stillAllocator->allocate(m_stillStream);
-    if (ret < 0) {
-        qWarning() << "Failed to allocate still capture buffers";
-        //TODO got error;
-        return;
-    }
+        qDebug() << "Creating still buffers";
+        for (const std::unique_ptr<libcamera::FrameBuffer> &buffer : m_allocator->buffers(m_stillStream)) {
+            qDebug() << "Creating still buffers....";
+            /* Map memory buffers and cache the mappings. */
+            std::unique_ptr<Image> image = Image::fromFrameBuffer(buffer.get(), Image::MapMode::ReadOnly);
+            assert(image != nullptr);
+            m_mappedBuffers[buffer.get()] = std::move(image);
 
-    qDebug() << "Creating still buffers";
-    for (const std::unique_ptr<libcamera::FrameBuffer> &buffer : m_stillAllocator->buffers(m_stillStream)) {
-        qDebug() << "Creating still buffers : 1";
-        /* Map memory buffers and cache the mappings. */
-        std::unique_ptr<Image> image = Image::fromFrameBuffer(buffer.get(), Image::MapMode::ReadOnly);
-        assert(image != nullptr);
-        m_mappedBuffers[buffer.get()] = std::move(image);
+            /* Store buffers on the free list. */
+            m_freeBuffers[m_stillStream].enqueue(buffer.get());
+        }
 
-        /* Store buffers on the free list. */
-        m_freeBuffers[m_stillStream].enqueue(buffer.get());
-    }
+        m_requests.clear();
 
-    m_requests.clear();
+        /* Create requests and fill them with buffers from the still stream. */
+        while (!m_freeBuffers[m_stillStream].isEmpty()) {
+            qDebug() << "Creating still request...";
+            libcamera::FrameBuffer *buffer = m_freeBuffers[m_stillStream].dequeue();
 
-    /* Create requests and fill them with buffers from the still stream. */
-    while (!m_freeBuffers[m_stillStream].isEmpty()) {
-        libcamera::FrameBuffer *buffer = m_freeBuffers[m_stillStream].dequeue();
+            std::unique_ptr<libcamera::Request> request = m_currentCamera->createRequest();
+            if (!request) {
+                qWarning() << "Can't create request";
+                ret = -ENOMEM;
+                //goto error;
+                return;
+            }
 
-        std::unique_ptr<libcamera::Request> request = m_currentCamera->createRequest();
-        if (!request) {
-            qWarning() << "Can't create request";
-            ret = -ENOMEM;
+            ret = request->addBuffer(m_stillStream, buffer);
+            if (ret < 0) {
+                qWarning() << "Can't set buffer for request";
+                //goto error;
+                return;
+            }
+
+            m_requests.push_back(std::move(request));
+        }
+
+        ret = m_currentCamera->start();
+        if (ret) {
+            qInfo() << "Failed to start capture";
             //goto error;
             return;
         }
 
-        ret = request->addBuffer(m_stillStream, buffer);
-        if (ret < 0) {
-            qWarning() << "Can't set buffer for request";
-            //goto error;
-            return;
+        setState(CapturingStill);
+
+        m_currentCamera->requestCompleted.connect(this, &CameraProxy::requestComplete);
+
+        /* Queue all requests. */
+        for (std::unique_ptr<libcamera::Request> &request : m_requests) {
+            ret = m_currentCamera->queueRequest(request.get());
+            if (ret < 0) {
+                qWarning() << "Can't queue request";
+                //goto error_disconnect;
+                return;
+            }
         }
-
-        m_requests.push_back(std::move(request));
-    }
-
-    ret = m_currentCamera->start();
-    if (ret) {
-        qInfo() << "Failed to start capture";
-        //goto error;
-        return;
-    }
-    setState(CapturingStill);
-
-    m_currentCamera->requestCompleted.connect(this, &CameraProxy::requestComplete);
-
-    /* Queue all requests. */
-    for (std::unique_ptr<libcamera::Request> &request : m_requests) {
-        ret = m_currentCamera->queueRequest(request.get());
-        if (ret < 0) {
-            qWarning() << "Can't queue request";
-            //goto error_disconnect;
-            return;
-        }
-    }
-}
+    }}
 
 bool CameraProxy::controlExists(CameraProxy::Control c)
 {
@@ -487,11 +587,11 @@ float CameraProxy::controlMin(CameraProxy::Control c)
     }
     switch(control->first->type()) {
     case libcamera::ControlTypeFloat:
-            return control->second.min().get<float>();
+        return control->second.min().get<float>();
     case libcamera::ControlTypeInteger32:
-            return control->second.min().get<int32_t>();
+        return control->second.min().get<int32_t>();
     case libcamera::ControlTypeInteger64:
-            return control->second.min().get<int64_t>();
+        return control->second.min().get<int64_t>();
     }
 
     return 0;
@@ -509,11 +609,11 @@ float CameraProxy::controlMax(CameraProxy::Control c)
     }
     switch(control->first->type()) {
     case libcamera::ControlTypeFloat:
-            return control->second.max().get<float>();
+        return control->second.max().get<float>();
     case libcamera::ControlTypeInteger32:
-            return control->second.max().get<int32_t>();
+        return control->second.max().get<int32_t>();
     case libcamera::ControlTypeInteger64:
-            return control->second.max().get<int64_t>();
+        return control->second.max().get<int64_t>();
     }
 
     return 0;
@@ -567,6 +667,40 @@ void CameraProxy::removeControlValue(Control c)
     m_controlValues.erase(c);
 }
 
+CameraProxy::CameraState CameraProxy::state() const
+{
+    return m_state;
+}
+
+void CameraProxy::setState(CameraState newState)
+{
+    qDebug() << Q_FUNC_INFO << newState;
+    m_state = newState;
+    Q_EMIT stateChanged();
+}
+
+//==================== Request / event handling ===========================
+
+void CameraProxy::requestComplete(libcamera::Request *request)
+{
+    //qDebug() << Q_FUNC_INFO;
+
+    if (request->status() == libcamera::Request::RequestCancelled)
+        return;
+
+    /*
+     * We're running in the libcamera thread context, expensive operations
+     * are not allowed. Add the buffer to the done queue and post a
+     * CaptureEvent for the application thread to handle.
+     */
+    {
+        QMutexLocker locker(&m_mutex);
+        m_doneQueue.enqueue(request);
+    }
+
+    QCoreApplication::postEvent(this, new CaptureEvent);
+}
+
 void CameraProxy::processCapture()
 {
     //qDebug() << Q_FUNC_INFO;
@@ -575,10 +709,10 @@ void CameraProxy::processCapture()
         return;
     }
     /*
-         * Retrieve the next buffer from the done queue. The queue may be empty
-         * if stopCapture() has been called while a CaptureEvent was posted but
-         * not processed yet. Return immediately in that case.
-         */
+     * Retrieve the next buffer from the done queue. The queue may be empty
+     * if stopCapture() has been called while a CaptureEvent was posted but
+     * not processed yet. Return immediately in that case.
+    */
     libcamera::Request *request;
     {
         QMutexLocker locker(&m_mutex);
@@ -589,11 +723,11 @@ void CameraProxy::processCapture()
     }
 
     /* Process buffers. */
-    if (m_state == CapturingViewFinder && request->buffers().count(m_viewFinderStream)) {
+    if (request->buffers().count(m_viewFinderStream)) {
         processViewfinder(request->buffers().at(m_viewFinderStream));
     }
 
-    if (m_state == CapturingStill && request->buffers().count(m_stillStream)) {
+    if (request->buffers().count(m_stillStream)) {
         processStill(request->buffers().at(m_stillStream));
     }
 
@@ -610,14 +744,29 @@ void CameraProxy::processViewfinder(libcamera::FrameBuffer *buffer)
 {
     //qDebug() << Q_FUNC_INFO;
 
-    m_viewFinder->renderImage(buffer, m_mappedBuffers[buffer].get());
+    Image *i = m_mappedBuffers[buffer].get();
+    QList<QRectF> rects = m_fd.detect(m_viewFinder->currentImage());
+
+    if (rects.length() > 0) {
+        m_rects = rects;
+        m_rectDelay = 30;
+    } else {
+        if (m_rectDelay > 0) {
+            m_rectDelay--;
+        }
+        if (m_rectDelay == 0) {
+            m_rects.clear();
+        }
+    }
+
+    m_viewFinder->renderImage(buffer, i, m_rects);
 }
 
 void CameraProxy::processStill(libcamera::FrameBuffer *buffer)
 {
     qDebug() << Q_FUNC_INFO << m_saveFileName << m_frame;
 
-    if (m_frame < 4) {
+    if (m_singleStream && m_frame < 4) {
         qDebug() << "Skipping frame " << m_frame;
         m_frame++;
         if (buffer)
@@ -627,12 +776,29 @@ void CameraProxy::processStill(libcamera::FrameBuffer *buffer)
 
     QFile file(m_saveFileName);
     if (!file.open(QIODevice::WriteOnly)) {
-           return;
+        return;
     }
 
-    size_t size = buffer->metadata().planes()[0].bytesused;
-    file.write((const char*)m_mappedBuffers[buffer].get()->data(0).data(), size);
+    size_t totalSize = 0;
+    for (uint plane = 0; plane < buffer->metadata().planes().size(); ++plane) {
+        totalSize += buffer->metadata().planes()[plane].bytesused;
+    }
+
+    file.write((const char*)m_mappedBuffers[buffer].get()->data(0).data(), totalSize);
     file.close();
+
+    EncoderJpeg jpeg;
+    bool ok = jpeg.encode(m_config->at(1), buffer, m_mappedBuffers[buffer].get(), QString(m_saveFileName + ".jpg").toStdString());
+    if (!ok) {
+        qDebug() << "Unable to save jpeg file";
+    }
+    qDebug() << "Saved JPEG as " << QString(m_saveFileName + ".jpg");
+
+
+    {
+        QMutexLocker locker(&m_mutex);
+        m_freeBuffers[m_stillStream].enqueue(buffer);
+    }
 
     if (buffer) {
         renderComplete(buffer);
@@ -643,11 +809,14 @@ void CameraProxy::processStill(libcamera::FrameBuffer *buffer)
 
 void CameraProxy::renderComplete(libcamera::FrameBuffer *buffer)
 {
+    //qDebug() << Q_FUNC_INFO << m_state << m_viewFinderStream << m_stillStream;
     libcamera::Request *request;
     {
         QMutexLocker locker(&m_mutex);
-        if (m_freeQueue.isEmpty())
+        if (m_freeQueue.isEmpty()) {
+            qDebug() << "Free queue empty";
             return;
+        }
 
         request = m_freeQueue.dequeue();
     }
@@ -659,23 +828,35 @@ void CameraProxy::renderComplete(libcamera::FrameBuffer *buffer)
                 request->controls().set(c.first, c.second);
             }
         }
-        m_currentCamera->queueRequest(request);
     }
-    if (m_state == CapturingStill && m_frame < 5) {
-        request->addBuffer(m_stillStream, buffer);
-        m_currentCamera->queueRequest(request);
+
+    if (m_singleStream) {
+        if ( m_state == CapturingStill && m_frame < 5) {
+            request->addBuffer(m_stillStream, buffer);
+        }
+    } else if (m_captureStill) {
+        qDebug() << "Submitting request for still image " << m_stillStream->configuration().toString().c_str();
+
+        libcamera::FrameBuffer *stillBuffer = nullptr;
+        {
+            QMutexLocker locker(&m_mutex);
+            if (!m_freeBuffers[m_stillStream].isEmpty()) {
+                stillBuffer = m_freeBuffers[m_stillStream].dequeue();
+            }
+
+            /* Create requests and fill them with buffers from the still stream. */
+            libcamera::FrameBuffer *buffer = m_freeBuffers[m_stillStream].dequeue();
+
+            int ret = request->addBuffer(m_stillStream, buffer);
+            if (ret < 0) {
+                qWarning() << "Can't set buffer for request";
+                //goto error;
+                return;
+            }
+
+        }
+        m_captureStill = false;
     }
-}
 
-CameraProxy::CameraState CameraProxy::state() const
-{
-    return m_state;
-}
-
-void CameraProxy::setState(CameraState newState)
-{
-    if (m_state == newState)
-        return;
-    m_state = newState;
-    Q_EMIT stateChanged();
+    m_currentCamera->queueRequest(request);
 }
