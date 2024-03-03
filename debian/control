@@ -1,14 +1,14 @@
-Source: harbour-pinhole
+Source: harbour-shutter
 Priority: optional
 Maintainer: Rafael Diniz <rafael@riseup.net>
-Build-Depends: debhelper (>= 5), pkg-config, libqt5core5a, libqt5multimedia5, libqt5qml5, libqt5quick5, qtdeclarative5-dev, libexif-dev, desktop-file-utils, libcamera-dev, qtmultimedia5-dev, qml-module-qtsensors
+Build-Depends: debhelper (>= 5), pkg-config, libqt5core5a, libqt5multimedia5, libqt5qml5, libqt5quick5, qtdeclarative5-dev, libexif-dev, desktop-file-utils, libcamera-dev, qtmultimedia5-dev, qml-module-qtsensors, libopencv-dev
 Standards-Version: 4.6.2
 Section: utils
-Homepage: http://github.com/piggz/harbour-pinhole
+Homepage: http://github.com/piggz/harbour-shutter
 
-Package: harbour-pinhole
+Package: harbour-shutter
 Section: utils
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, qml-module-qtmultimedia, qml-module-org-kde-kirigami2, qml-module-qtsensors
 Multi-Arch: same
-Description: Pinhole is a camera application built ontop of libcamera.
+Description: Shutter is a camera application built ontop of libcamera.

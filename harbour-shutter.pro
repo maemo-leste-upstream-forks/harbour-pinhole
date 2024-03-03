@@ -10,15 +10,17 @@
 #   - translation filenames have to be changed
 
 # The name of your application
-TARGET = harbour-pinhole
+TARGET = harbour-shutter
 
 CONFIG += link_pkgconfig
 CONFIG += sailfishapp
 CONFIG += no_keywords
 CONFIG += c++1z
 
-QT += quick multimedia
-PKGCONFIG += libcamera
+QT += quick multimedia multimedia-private
+PKGCONFIG += libcamera opencv4
+
+INCLUDEPATH += /usr/local/include/libcamera
 
 SOURCES += \
     src/cameramodel.cpp \
@@ -27,11 +29,13 @@ SOURCES += \
     src/effectsmodel.cpp \
     src/exifmodel.cpp \
     src/exposuremodel.cpp \
+    src/facedetection.cpp \
     src/format_converter.cpp \
     src/formatmodel.cpp \
-    src/harbour-pinhole.cpp \
+    src/harbour-shutter.cpp \
     src/image.cpp \
     src/isomodel.cpp \
+    src/encoder_jpeg.cpp \
     src/metadatamodel.cpp \
     src/resolutionmodel.cpp \
     src/settings.cpp \
@@ -47,6 +51,7 @@ SOURCES += \
 
 DISTFILES += \
     README.md \
+    assets/classifiers/lbpcascade_frontalface.xml \
     qml/components/ControlSlider.qml \
     qml/components/DockModes.qml \
     qml/components/DockedControlListView.qml \
@@ -55,6 +60,7 @@ DISTFILES += \
     qml/components/platform.qtcontrols/DockedPanelPL.qml \
     qml/components/platform.silica/DockedPanelPL.qml \
     qml/components/platform.silica/SlideshowPL.qml \
+    qml/harbour-shutter.qml \
     qml/pages/SettingsX.qml \
     qml/pics/icon-camera-switch.svg \
     qml/pics/icon-m-camera.svg \
@@ -72,10 +78,9 @@ DISTFILES += \
     qml/components/AboutMedia.qml \
     qml/pages/AboutImage.qml \
     qml/pages/AboutVideo.qml \
-    rpm/harbour-pinhole.spec \
+    rpm/harbour-shutter.spec \
     translations/*.ts \
-    harbour-pinhole.desktop \
-    qml/pinhole.qml \
+    harbour-shutter.desktop \
     qml/components/IconSwitch.qml \
     qml/components/RoundButton.qml \
     qml/cover/CoverPage.qml \
@@ -146,10 +151,12 @@ HEADERS += \
     src/effectsmodel.h \
     src/exifmodel.h \
     src/exposuremodel.h \
+    src/facedetection.h \
     src/format_converter.h \
     src/formatmodel.h \
     src/image.h \
     src/isomodel.h \
+    src/encoder_jpeg.h \
     src/metadatamodel.h \
     src/resolutionmodel.h \
     src/settings.h \
@@ -167,7 +174,7 @@ HEADERS += \
 LIBS += -ldl
 
 RESOURCES += \
-    pinhole.qrc
+    shutter.qrc
 
 equals(FLAVOR, "silica") {
     CONFIG += flavor_silica
@@ -231,10 +238,10 @@ icons.path = $$DATADIR/qml/pics
 qmlplatform.extra = mkdir -p ${INSTALL_ROOT}$$DATADIR/qml/components/platform && cp -L -v $$PWD/qml/components/platform.$$FLAVOR/*.qml ${INSTALL_ROOT}$$DATADIR/qml/components/platform
 qmlplatform.path = $$DATADIR/qml/platform
 
-desktopfile.files = harbour-pinhole.desktop
+desktopfile.files = harbour-shutter.desktop
 desktopfile.path = $$PREFIX/share/applications
 
-appicon.files = ../harbour-pinhole.svg
+appicon.files = ../harbour-shutter.svg
 appicon.path = $$PREFIX/share/icons/hicolor/scalable/apps
 
 INSTALLS += qmlplatform qml js icons target desktopfile appicon

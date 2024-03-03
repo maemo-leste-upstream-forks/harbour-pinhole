@@ -7,14 +7,13 @@
 #include <QMutex>
 #include <QSize>
 #include <QPixmap>
+#include <QVideoFrame>
 
 #include <libcamera/formats.h>
 #include <libcamera/framebuffer.h>
 #include <libcamera/pixel_format.h>
 
-#include "format_converter.h"
 #include "viewfinder.h"
-
 
 class ViewFinder2D : public QQuickPaintedItem, public ViewFinder
 {
@@ -27,10 +26,10 @@ public:
     int setFormat(const libcamera::PixelFormat &format, const QSize &size,
                   const libcamera::ColorSpace &colorSpace,
                   unsigned int stride) override;
-    void renderImage(libcamera::FrameBuffer *buffer, class Image *image) override;
+    void renderImage(libcamera::FrameBuffer *buffer, class Image *image, QList<QRectF>) override;
     void stop() override;
 
-    //QImage getCurrentImage() override;
+    QImage currentImage();
 
 Q_SIGNALS:
     void renderComplete(libcamera::FrameBuffer *buffer);
@@ -39,20 +38,21 @@ protected:
     virtual void paint(QPainter *) override;
 
 private:
-    FormatConverter converter_;
-
-    libcamera::PixelFormat format_;
-    QSize size_;
+    libcamera::PixelFormat m_format;
+    QVideoFrame::PixelFormat m_qvFormat;
+    QSize m_size;
 
     /* Camera stopped icon */
-    QSizeF vfSize_;
-    QPixmap pixmap_;
+    QSizeF m_vfSize;
+    QPixmap m_pixmap;
 
     /* Buffer and render image */
-    libcamera::FrameBuffer *buffer_;
-    QImage image_;
-    QMutex mutex_; /* Prevent concurrent access to image_ */
+    libcamera::FrameBuffer *m_buffer;
+    QImage m_image;
+    QVideoFrame m_frame;
+    QMutex m_mutex; /* Prevent concurrent access to image_ */
 
+    QList<QRectF> m_rects;
 };
 
 #endif // VIEWFINDER2D_H

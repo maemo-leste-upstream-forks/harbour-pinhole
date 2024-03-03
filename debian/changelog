@@ -1,47 +1,5 @@
-harbour-pinhole (0.0.7-1) unstable; urgency=low
-
-  * Big refactor. New controls.
-
- -- Rafael Diniz <rafael@riseup.net> Wed, 15 Feb 2023 15:12:23 +0300
-
-harbour-pinhole (0.0.6-1) unstable; urgency=low
-
-  * More upstream fixes.
-
- -- Rafael Diniz <rafael@riseup.net> Mon, 06 Feb 2023 09:10:01 +0300
-
-harbour-pinhole (0.0.5-1) unstable; urgency=low
-
-  * More upstream fixes.
-
- -- Rafael Diniz <rafael@riseup.net>  Wed, 01 Feb 2023 12:30:11 +0300
-
-harbour-pinhole (0.0.4-1) unstable; urgency=low
-
-  * Front camera and switching between cameras support.
-
- -- Rafael Diniz <rafael@riseup.net>  Tue, 31 Jan 2023 10:31:45 +0300
-
-harbour-pinhole (0.0.3-1) unstable; urgency=low
-
-  * Many fixes from upstream.
-
- -- Rafael Diniz <rafael@riseup.net>  Tue, 31 Jan 2023 00:01:09 +0300
-
-harbour-pinhole (0.0.2-1) unstable; urgency=low
-
-  * First working version.
-
- -- Rafael Diniz <rafael@riseup.net>  Mon, 30 Jan 2023 00:33:21 +0300
-
-harbour-pinhole (0.0.1-2) unstable; urgency=low
-
-  * Fixes for pinhole crashes.
-
- -- Rafael Diniz <rafael@riseup.net>  Fri, 27 Jan 2023 01:01:09 +0300
-
-harbour-pinhole (0.0.1-1) unstable; urgency=low
+harbour-shutter (0.0.8-1) unstable; urgency=low
 
   * Initial import
 
- -- Rafael Diniz <rafael@riseup.net>  Tue, 24 Jan 2023 01:53:12 +0300
+ -- Rafael Diniz <rafael@riseup.net>  Sun, 03 Mar 2024 12:00:00 +0000
